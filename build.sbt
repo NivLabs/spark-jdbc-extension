@@ -7,9 +7,7 @@ lazy val root = (project in file("."))
     licenses := List("Apache 2" -> new URL("http://www.apache.org/licenses/LICENSE-2.0.txt")),
     idePackagePrefix := Some("zone.nilo"),
     organization := "zone.nilo",
-    organization := "br.com.nivlabs",
     organizationName := "Nilo Zone",
-    organizationName := "NivLabs",
     publishMavenStyle := true,
     pomIncludeRepository := { _ => false },
     publishTo := {
