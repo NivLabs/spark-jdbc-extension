@@ -1,51 +1,45 @@
-package zone.nilo
-package handlers
+package zone.nilo.handlers
 
 import com.zaxxer.hikari.HikariDataSource
-import domains.DBConnectionData
-import handlers.ConnectionPoolManager.getDataSource
-import helpers.PgIO
-import helpers.SparkSessionHandler.getSparkSession
 import org.apache.spark.sql.functions.col
-import org.apache.spark.sql.{DataFrame, Row}
+import org.apache.spark.sql.{DataFrame, Row, SparkSession}
+import zone.nilo.domains.DBConnectionData.{DF, DirectJoin, Query}
+import zone.nilo.helpers.PgIO
+import zone.nilo.handlers.ConnectionPoolManager.getDataSource
+import zone.nilo.handlers.PostgresHandler.{getSparkSchema, parseRow, setParams}
 
 import java.sql.{Connection, PreparedStatement, ResultSet}
 
 object DataFrameExtensions {
 
   implicit class JDBCExtension(df1: DataFrame) {
-    def joinJDBC(
-        query: String,
-        joinExpr: Seq[String],
-        joinType: String = "inner",
-        directJDBC: Boolean = false,
-        dbConf: DBConnectionData): DataFrame = {
-
-      val df2Processed = if (directJDBC) {
-        directJoin(df1, joinExpr, query, dbConf)
-      } else {
-        PgIO.getData(query, dbConf)
+    def joinJDBC(pack: DirectJoin, joinExpr: Seq[String], joinType: String = "inner")(implicit
+        sparkSession: SparkSession): DataFrame = {
+      pack match {
+        case query: Query =>
+          df1.join(directJoin(sparkSession, df1, joinExpr, query), joinExpr, joinType)
+        case DF(dataFrame) => df1.join(dataFrame, joinExpr, joinType)
+        case _ => throw new Exception("Invalid query type")
       }
-      df1.join(df2Processed, joinExpr, joinType)
     }
   }
 
-  private def directJoin(
+  private def directJoin(implicit
+      sparkSession: SparkSession,
       df: DataFrame,
       joinExpr: Seq[String],
-      query: String,
-      dbConf: DBConnectionData,
+      query: Query,
       qtPools: Int = 0,
       securityRepartition: Boolean = true,
-      securityLimit: Int = 8) = {
+      securityLimit: Int = 8): DataFrame = {
 
     val repartitionDelta =
-      if (getSparkSession.conf.get("spark.submit.deployMode") == "cluster") {
+      if (sparkSession.conf.get("spark.master") == "yarn") {
         qtPools match {
           case x if x != 0 => securityManager(x, securityRepartition, securityLimit)
           case _ =>
-            val numExecutors = getSparkSession.conf.get("spark.executor.instances").toInt
-            val numCores = getSparkSession.conf.get("spark.executor.cores").toInt
+            val numExecutors = sparkSession.conf.get("spark.executor.instances").toInt
+            val numCores = sparkSession.conf.get("spark.executor.cores").toInt
             val result = (numExecutors * numCores) * 3
             securityManager(result, securityRepartition, securityLimit)
         }
@@ -61,17 +55,17 @@ object DataFrameExtensions {
     val joinColumnNames = joinData.schema.fields
       .map(_.name)
 
-    val appName = getSparkSession.conf.get("spark.app.name")
-
     val fetchedDataRDD = joinData.rdd.mapPartitions(partition => {
-      val dataSource = getDataSource(dbConf)
+      val dataSource = getDataSource(query.dbConf)
 
-      val result = fetchData(partition, joinColumnNames, query, dataSource)
+      val result = fetchData(partition, joinColumnNames, query.query, dataSource)
       result
 
     })
-    val fetchedDataSchema = PgIO.getData(query, dbConf).schema
-    val fetchedDataStatement = getSparkSession.createDataFrame(fetchedDataRDD, fetchedDataSchema)
+    val fetchedDataSchema = PgIO.select(query).schema
+    val fetchedDataStatement = sparkSession.createDataFrame(fetchedDataRDD, fetchedDataSchema)
+
+    fetchedDataStatement.show()
 
     fetchedDataStatement
   }
@@ -105,22 +99,18 @@ object DataFrameExtensions {
 
         statement = connection.prepareStatement(where)
 
-        keyValue.toSeq.zipWithIndex.foreach { case (value, index) =>
-          statement.setObject(index + 1, value)
-        }
+        setParams(keyValue, statement)
 
         resultSet = statement.executeQuery()
-        val metaData = resultSet.getMetaData
-        val columnCount = metaData.getColumnCount
+
+        val schema = getSparkSchema(resultSet)
 
         Iterator
           .continually(resultSet)
           .takeWhile(_.next())
-          .map { row =>
-            val values = (1 to columnCount).map(row.getObject)
-            Row.fromSeq(values)
-          }
+          .map(row => parseRow(row, schema))
           .toList
+
       } finally {
         if (resultSet != null) resultSet.close()
         if (statement != null) statement.close()
@@ -128,4 +118,5 @@ object DataFrameExtensions {
       }
     }
   }
+
 }

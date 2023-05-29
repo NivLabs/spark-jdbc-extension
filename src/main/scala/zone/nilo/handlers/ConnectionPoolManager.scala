@@ -1,8 +1,7 @@
-package zone.nilo
-package handlers
+package zone.nilo.handlers
 
-import domains.DBConnectionData
 import com.zaxxer.hikari.{HikariConfig, HikariDataSource}
+import zone.nilo.domains.DBConnectionData
 
 object ConnectionPoolManager {
 
