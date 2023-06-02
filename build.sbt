@@ -3,8 +3,9 @@ ThisBuild / scalaVersion := "2.12.17"
 lazy val root = (project in file("."))
   .settings(
     licenses := List("Apache 2" -> new URL("http://www.apache.org/licenses/LICENSE-2.0.txt")),
-    version := "1.0.1",
+    version := "1.0.2",
     versionScheme := Some("early-semver"),
+    startYear := Some(2023),
     developers := List(
       Developer(
         id = "daniloarodrigues",

@@ -65,8 +65,6 @@ object DataFrameExtensions {
     val fetchedDataSchema = PgIO.select(query).schema
     val fetchedDataStatement = sparkSession.createDataFrame(fetchedDataRDD, fetchedDataSchema)
 
-    fetchedDataStatement.show()
-
     fetchedDataStatement
   }
 
